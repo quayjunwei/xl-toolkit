@@ -1,4 +1,3 @@
-Attribute VB_Name = "Module1"
 
 ' Module: GroupTools
 Option Explicit
@@ -77,8 +76,11 @@ Public Sub GroupRowsByOSMId()
 
             ' Only group if more than 1 row in block (unless GROUP_SINGLETONS=True)
             If GROUP_SINGLETONS Or r > startRow Then
-                ws.Rows(startRow & ":" & r).Group
+                If r > startRow Then
+                    ws.Rows((startRow + 1) & ":" & r).Group
+                End If
             End If
+
             startRow = r + 1
         End If
 ContinueLoop:
