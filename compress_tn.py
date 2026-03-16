@@ -4,8 +4,6 @@ import zipfile
 import tempfile
 from PIL import Image
 
-
-# configuration
 EXCEL_FILE = r"PATH//TO//EXCEL"
 COMPRESSION_QUALITY = 70
 
@@ -15,8 +13,16 @@ def compress_excel_images(excel_file: str, compression_quality: int = 70) -> str
     Compress embedded images inside an Excel (.xlsx) file by recompressing
     images in the internal `xl/media` directory as JPEG.
 
-    The original file is not modified. A new file with "_compressed"
-    appended to the filename is created.
+    The original file is overwritten with the compressed version.
+    A temporary file is used during processing to ensure the original
+    is not corrupted if an error occurs.
+
+    Args:
+        excel_file: Path to the .xlsx file to compress.
+        compression_quality: JPEG quality (1-95). Lower = smaller file, lower quality.
+
+    Returns:
+        Path to the compressed file (same as input).
     """
 
     if not os.path.exists(excel_file):
@@ -30,7 +36,6 @@ def compress_excel_images(excel_file: str, compression_quality: int = 70) -> str
     print("=" * 60)
 
     temp_dir = tempfile.mkdtemp(prefix="excel_compress_")
-    output_excel = excel_file.replace(".xlsx", "_compressed.xlsx")
 
     try:
         print("\nExtracting Excel contents...")
@@ -58,13 +63,10 @@ def compress_excel_images(excel_file: str, compression_quality: int = 70) -> str
                 total_before += size_before
 
                 img = Image.open(img_path)
-
-                # remove transparency if present
                 if img.mode in ("RGBA", "P", "LA"):
                     img = img.convert("RGB")
 
                 temp_file = os.path.join(media_folder, f"_temp_{filename}")
-
                 img.save(temp_file, "JPEG", quality=compression_quality, optimize=True)
                 img.close()
 
@@ -75,59 +77,53 @@ def compress_excel_images(excel_file: str, compression_quality: int = 70) -> str
                 total_after += size_after
 
                 reduction = ((size_before - size_after) / size_before) * 100
-
                 print(
-                    f"{filename}: "
-                    f"{size_before/1024:.1f}KB → "
-                    f"{size_after/1024:.1f}KB "
-                    f"(-{reduction:.1f}%)"
+                    f"{filename}: {size_before/1024:.1f}KB → {size_after/1024:.1f}KB (-{reduction:.1f}%)"
                 )
 
             if total_before > 0:
                 print(
-                    f"\nTotal images: "
-                    f"{total_before/1024/1024:.2f}MB → "
-                    f"{total_after/1024/1024:.2f}MB"
+                    f"\nTotal images: {total_before/1024/1024:.2f}MB → {total_after/1024/1024:.2f}MB"
                 )
                 print(
-                    f"Image reduction: "
-                    f"{((total_before - total_after) / total_before) * 100:.1f}%"
+                    f"Image reduction: {((total_before - total_after) / total_before) * 100:.1f}%"
                 )
         else:
             print("No images found in Excel file.")
 
         print("\nRebuilding Excel file...")
 
-        if os.path.exists(output_excel):
-            os.remove(output_excel)
+        # Write to temp first to avoid corrupting original if something goes wrong
+        temp_output = excel_file + ".tmp"
+        if os.path.exists(temp_output):
+            os.remove(temp_output)
 
-        with zipfile.ZipFile(output_excel, "w", zipfile.ZIP_DEFLATED) as zipf:
+        with zipfile.ZipFile(temp_output, "w", zipfile.ZIP_DEFLATED) as zipf:
             for root, _, files in os.walk(temp_dir):
                 for file in files:
                     file_path = os.path.join(root, file)
                     arcname = os.path.relpath(file_path, temp_dir)
                     zipf.write(file_path, arcname)
 
-        print("Cleaning up temporary files...")
         shutil.rmtree(temp_dir)
 
         original_size = os.path.getsize(excel_file)
-        compressed_size = os.path.getsize(output_excel)
+        compressed_size = os.path.getsize(temp_output)
         reduction = ((original_size - compressed_size) / original_size) * 100
+
+        # Atomically replace original with compressed version
+        os.replace(temp_output, excel_file)
 
         print("\nDone.")
         print(f"Original:   {original_size/1024/1024:.2f} MB")
         print(f"Compressed: {compressed_size/1024/1024:.2f} MB")
-
         if reduction > 0:
             print(f"Reduction:  {reduction:.1f}%")
         else:
             print(f"Size change: +{abs(reduction):.1f}%")
+        print(f"\nSaved to: {excel_file}")
 
-        print(f"\nSaved to: {output_excel}")
-        print("Original file was not modified.")
-
-        return output_excel
+        return excel_file
 
     finally:
         if os.path.exists(temp_dir):
